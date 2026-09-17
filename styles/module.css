@@ -462,3 +462,21 @@
   cursor: default;
   border-color: transparent;
 }
+
+/* Token torch dialog — luminosity slider */
+.dm-toolkit-token-torch-form .dm-toolkit-token-torch-luminosity .form-fields {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dm-toolkit-token-torch-form .dm-toolkit-token-torch-luminosity input[type="range"] {
+  flex: 1;
+  min-width: 0;
+}
+
+.dm-toolkit-token-torch-form .dm-toolkit-token-torch-luminosity-value {
+  min-width: 2.5rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

@@ -64,9 +64,13 @@ When enabled, rolls made by the GM do not play the dice sound. If the chat/roll 
 Adds a flame button to the **token HUD** (right-click a token).
 
 1. Click the flame to light a torch.
-2. A dialog asks for **Bright** (default 20), **Dim** (default 40), and **Light animation** (defaults to Torch).
-3. The token becomes a moving light source with those settings.
+2. A dialog asks for **Bright** (default 20), **Dim** (default 40), **Torch brightness** (slider, default 0.1), and **Light animation**.
+3. The token becomes a moving light source with those settings (follows automatically).
 4. Click the flame again to extinguish and restore the previous light config.
+
+**Allow players to toggle torch** (module setting): when enabled, token owners can see and use the button; when disabled, only the GM sees it.
+
+**Torch brightness** (module setting): default luminosity of the torch glow. Lower values are softer.
 
 ---
 

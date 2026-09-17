@@ -4,9 +4,12 @@
 
 const MODULE_ID = "DM-toolkit-for-dnd5e";
 const ENABLED_SETTING = "tokenTorch";
+const ALLOW_PLAYERS_SETTING = "tokenTorchAllowPlayers";
+const LUMINOSITY_SETTING = "tokenTorchLuminosity";
 const FLAG_KEY = "tokenTorch";
 const DEFAULT_BRIGHT = 20;
 const DEFAULT_DIM = 40;
+const DEFAULT_LUMINOSITY = 0.1;
 // CONFIG key `flame` is localized as "Torch"; key `torch` is "Flickering Light".
 const DEFAULT_ANIMATION = "flame";
 const BUTTON_SELECTOR = ".dm-toolkit-token-torch";
@@ -15,6 +18,7 @@ export function registerTokenTorch() {
   Hooks.once("setup", patchTokenHudRender);
   Hooks.on("renderTokenHUD", injectFromHook);
   Hooks.on("renderTokenHUD5e", injectFromHook);
+  Hooks.on("deleteToken", onDeleteToken);
 }
 
 export function registerTokenTorchSettings() {
@@ -25,15 +29,42 @@ export function registerTokenTorchSettings() {
     config: true,
     type: Boolean,
     default: false,
+    onChange: () => refreshTorchHud()
+  });
+
+  game.settings.register(MODULE_ID, ALLOW_PLAYERS_SETTING, {
+    name: "DM-TOOLKIT-DND5E.Settings.TokenTorchAllowPlayers.Name",
+    hint: "DM-TOOLKIT-DND5E.Settings.TokenTorchAllowPlayers.Hint",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true,
+    onChange: () => refreshTorchHud()
+  });
+
+  game.settings.register(MODULE_ID, LUMINOSITY_SETTING, {
+    name: "DM-TOOLKIT-DND5E.Settings.TokenTorchLuminosity.Name",
+    hint: "DM-TOOLKIT-DND5E.Settings.TokenTorchLuminosity.Hint",
+    scope: "world",
+    config: true,
+    type: Number,
+    range: { min: 0, max: 1, step: 0.05 },
+    default: DEFAULT_LUMINOSITY,
     onChange: () => {
-      foundry.applications.instances.get("dm-toolkit-token-torch")?.close?.();
-      const hud = canvas?.tokens?.hud;
-      if (hud?.rendered) {
-        if (isFeatureEnabled()) injectTorchButton(hud);
-        else hud.element?.querySelector(BUTTON_SELECTOR)?.remove();
-      }
+      void refreshActiveTorchAppearance();
     }
   });
+}
+
+/**
+ * Refresh the token HUD torch button after a setting change.
+ */
+function refreshTorchHud() {
+  foundry.applications.instances.get("dm-toolkit-token-torch")?.close?.();
+  const hud = canvas?.tokens?.hud;
+  if (!hud?.rendered) return;
+  if (isFeatureEnabled() && canSeeTorchButton()) injectTorchButton(hud);
+  else hud.element?.querySelector(BUTTON_SELECTOR)?.remove();
 }
 
 /**
@@ -72,15 +103,105 @@ function isFeatureEnabled() {
 }
 
 /**
+ * @returns {boolean}
+ */
+function allowPlayersToToggleTorch() {
+  try {
+    return Boolean(game.settings.get(MODULE_ID, ALLOW_PLAYERS_SETTING));
+  } catch (_err) {
+    return true;
+  }
+}
+
+/**
+ * @returns {boolean}
+ */
+function canSeeTorchButton() {
+  return game.user?.isGM || allowPlayersToToggleTorch();
+}
+
+/**
+ * @returns {number}
+ */
+function getTorchLuminosity() {
+  try {
+    const value = Number(game.settings.get(MODULE_ID, LUMINOSITY_SETTING));
+    if (!Number.isFinite(value)) return DEFAULT_LUMINOSITY;
+    return Math.min(1, Math.max(0, value));
+  } catch (_err) {
+    return DEFAULT_LUMINOSITY;
+  }
+}
+
+/**
+ * @param {number} [luminosity]
+ * @returns {number}
+ */
+function normalizeLuminosity(luminosity) {
+  const value = Number(luminosity);
+  if (!Number.isFinite(value)) return getTorchLuminosity();
+  return Math.min(1, Math.max(0, value));
+}
+
+/**
+ * Soft torch appearance — low luminosity/alpha so the area glows without a harsh wash.
+ * @param {number} [luminosity]
+ * @returns {{luminosity: number, alpha: number, attenuation: number}}
+ */
+function getTorchLightAppearance(luminosity) {
+  const lum = normalizeLuminosity(luminosity);
+  return {
+    luminosity: lum,
+    alpha: Math.min(0.45, Math.max(0.12, lum + 0.12)),
+    attenuation: 0.75
+  };
+}
+
+/**
  * @param {TokenDocument} tokenDoc
- * @returns {{active: boolean, priorLight: object|null}}
+ * @returns {{active: boolean, priorLight: object|null, lightId: string|null, luminosity: number|null}}
  */
 function getTorchState(tokenDoc) {
   const raw = tokenDoc?.getFlag(MODULE_ID, FLAG_KEY);
   return {
     active: Boolean(raw?.active),
-    priorLight: raw?.priorLight ?? null
+    priorLight: raw?.priorLight ?? null,
+    lightId: typeof raw?.lightId === "string" ? raw.lightId : null,
+    luminosity: Number.isFinite(Number(raw?.luminosity)) ? Number(raw.luminosity) : null
   };
+}
+
+/**
+ * Push current luminosity onto tokens that already have a torch lit.
+ * @returns {Promise<void>}
+ */
+async function refreshActiveTorchAppearance() {
+  if (!game.user?.isGM) return;
+  const appearance = getTorchLightAppearance();
+  const updates = [];
+  for (const tokenDoc of canvas?.scene?.tokens ?? []) {
+    if (!getTorchState(tokenDoc).active) continue;
+    updates.push({
+      _id: tokenDoc.id,
+      "light.luminosity": appearance.luminosity,
+      "light.alpha": appearance.alpha,
+      "light.attenuation": appearance.attenuation
+    });
+  }
+  if (!updates.length) return;
+  try {
+    await canvas.scene.updateEmbeddedDocuments("Token", updates);
+  } catch (err) {
+    console.warn(`${MODULE_ID} | Failed to refresh torch luminosity`, err);
+  }
+}
+
+/**
+ * @param {TokenDocument} tokenDoc
+ * @returns {Promise<void>}
+ */
+async function onDeleteToken(tokenDoc) {
+  await deleteLegacyTorchAmbientLight(tokenDoc);
 }
 
 /**
@@ -107,7 +228,6 @@ function getAnimationChoices() {
 }
 
 /**
- * Build the dialog content element. Always uses fixed defaults (20 / 40 / Torch).
  * @returns {HTMLDivElement}
  */
 function buildTorchDialogContent() {
@@ -118,6 +238,7 @@ function buildTorchDialogContent() {
   form.append(
     buildNumberField("bright", "DM-TOOLKIT-DND5E.TokenTorch.Bright", DEFAULT_BRIGHT),
     buildNumberField("dim", "DM-TOOLKIT-DND5E.TokenTorch.Dim", DEFAULT_DIM),
+    buildLuminosityField(getTorchLuminosity()),
     buildAnimationField()
   );
   root.append(form);
@@ -146,11 +267,47 @@ function buildNumberField(name, labelKey, value) {
   input.min = "0";
   input.step = "1";
   input.required = true;
-  // setAttribute so the value survives DialogV2's innerHTML round-trip.
   input.setAttribute("value", String(value));
   input.value = String(value);
 
   fields.append(input);
+  group.append(label, fields);
+  return group;
+}
+
+/**
+ * @param {number} value
+ * @returns {HTMLDivElement}
+ */
+function buildLuminosityField(value) {
+  const lum = normalizeLuminosity(value);
+  const group = document.createElement("div");
+  group.className = "form-group dm-toolkit-token-torch-luminosity";
+
+  const label = document.createElement("label");
+  label.textContent = game.i18n.localize("DM-TOOLKIT-DND5E.Settings.TokenTorchLuminosity.Name");
+
+  const fields = document.createElement("div");
+  fields.className = "form-fields";
+
+  const input = document.createElement("input");
+  input.type = "range";
+  input.name = "luminosity";
+  input.min = "0";
+  input.max = "1";
+  input.step = "0.05";
+  input.setAttribute("value", String(lum));
+  input.value = String(lum);
+
+  const readout = document.createElement("span");
+  readout.className = "dm-toolkit-token-torch-luminosity-value";
+  readout.textContent = lum.toFixed(2);
+
+  input.addEventListener("input", () => {
+    readout.textContent = Number(input.value).toFixed(2);
+  });
+
+  fields.append(input, readout);
   group.append(label, fields);
   return group;
 }
@@ -175,7 +332,6 @@ function buildAnimationField() {
   const defaultChoice = choices.find(entry => entry.key === DEFAULT_ANIMATION);
   const otherChoices = choices.filter(entry => entry.key !== DEFAULT_ANIMATION);
 
-  // Default type first so it remains visible even if selected-state is stripped.
   const ordered = [
     ...(defaultChoice ? [defaultChoice] : []),
     { key: "", label: game.i18n.localize("COMMON.None") },
@@ -214,13 +370,14 @@ function applyAnimationSelection(root, value) {
 }
 
 /**
- * Re-apply dialog defaults after DialogV2 inserts content into the DOM.
  * @param {HTMLElement|null|undefined} root
  */
 function applyDialogDefaults(root) {
   if (!root) return;
   const bright = root.querySelector('input[name="bright"]');
   const dim = root.querySelector('input[name="dim"]');
+  const luminosity = root.querySelector('input[name="luminosity"]');
+  const readout = root.querySelector(".dm-toolkit-token-torch-luminosity-value");
   if (bright) {
     bright.value = String(DEFAULT_BRIGHT);
     bright.setAttribute("value", String(DEFAULT_BRIGHT));
@@ -228,6 +385,20 @@ function applyDialogDefaults(root) {
   if (dim) {
     dim.value = String(DEFAULT_DIM);
     dim.setAttribute("value", String(DEFAULT_DIM));
+  }
+  if (luminosity) {
+    const lum = getTorchLuminosity();
+    luminosity.value = String(lum);
+    luminosity.setAttribute("value", String(lum));
+    if (readout) readout.textContent = lum.toFixed(2);
+    if (!luminosity.dataset.dmToolkitBound) {
+      luminosity.dataset.dmToolkitBound = "1";
+      luminosity.addEventListener("input", () => {
+        const el = luminosity.closest(".form-group")
+          ?.querySelector(".dm-toolkit-token-torch-luminosity-value");
+        if (el) el.textContent = Number(luminosity.value).toFixed(2);
+      });
+    }
   }
   applyAnimationSelection(root, DEFAULT_ANIMATION);
 }
@@ -240,7 +411,7 @@ function injectTorchButton(app) {
   if (!(root instanceof HTMLElement)) return;
 
   root.querySelector(BUTTON_SELECTOR)?.remove();
-  if (!isFeatureEnabled()) return;
+  if (!isFeatureEnabled() || !canSeeTorchButton()) return;
 
   const tokenDoc = app.document ?? app.object?.document;
   if (!tokenDoc) return;
@@ -281,7 +452,7 @@ function injectTorchButton(app) {
  * @returns {Promise<void>}
  */
 async function onTorchButtonClick(tokenDoc) {
-  if (!tokenDoc?.isOwner) {
+  if (!canSeeTorchButton() || !tokenDoc?.isOwner) {
     ui.notifications.warn(game.i18n.localize("DM-TOOLKIT-DND5E.TokenTorch.ErrNoPermission"));
     return;
   }
@@ -326,6 +497,7 @@ async function promptAndLightTorch(tokenDoc) {
           return {
             bright: Math.max(0, Number(form.elements.bright?.value) || 0),
             dim: Math.max(0, Number(form.elements.dim?.value) || 0),
+            luminosity: normalizeLuminosity(form.elements.luminosity?.value),
             animation: value === "" ? null : normalizeAnimationType(value)
           };
         }
@@ -343,7 +515,25 @@ async function promptAndLightTorch(tokenDoc) {
     ui.notifications.warn(game.i18n.localize("DM-TOOLKIT-DND5E.TokenTorch.ErrDimLessThanBright"));
     return;
   }
-  await lightTorch(tokenDoc, result.bright, result.dim, result.animation);
+  await lightTorch(tokenDoc, result.bright, result.dim, result.animation, result.luminosity);
+}
+
+/**
+ * Delete a legacy AmbientLight created by older torch versions.
+ * @param {TokenDocument} tokenDoc
+ * @returns {Promise<void>}
+ */
+async function deleteLegacyTorchAmbientLight(tokenDoc) {
+  const lightId = getTorchState(tokenDoc).lightId;
+  if (!lightId || !canvas?.scene) return;
+  const light = canvas.scene.lights.get(lightId);
+  if (!light) return;
+  if (!game.user.isGM) return;
+  try {
+    await light.delete();
+  } catch (err) {
+    console.warn(`${MODULE_ID} | Failed to delete legacy torch AmbientLight`, err);
+  }
 }
 
 /**
@@ -351,27 +541,41 @@ async function promptAndLightTorch(tokenDoc) {
  * @param {number} bright
  * @param {number} dim
  * @param {string|null} animation
+ * @param {number} [luminosity]
  * @returns {Promise<void>}
  */
-async function lightTorch(tokenDoc, bright, dim, animation = DEFAULT_ANIMATION) {
+async function lightTorch(tokenDoc, bright, dim, animation = DEFAULT_ANIMATION, luminosity) {
+  await deleteLegacyTorchAmbientLight(tokenDoc);
+
   const priorLight = foundry.utils.duplicate(tokenDoc.toObject().light ?? {});
   const animationType = animation === undefined ? DEFAULT_ANIMATION : animation;
+  const appearance = getTorchLightAppearance(luminosity);
+
   await tokenDoc.update({
     light: {
       ...priorLight,
       bright,
       dim,
-      color: priorLight.color || "#ff9329",
-      alpha: priorLight.alpha ?? 0.5,
+      color: "#ff9329",
+      luminosity: appearance.luminosity,
+      alpha: appearance.alpha,
+      attenuation: appearance.attenuation,
+      coloration: 1,
+      contrast: 0,
+      shadows: 0,
+      saturation: 0,
+      vision: false,
       animation: {
         type: animationType,
-        speed: priorLight.animation?.speed ?? 5,
-        intensity: priorLight.animation?.intensity ?? 5,
-        reverse: priorLight.animation?.reverse ?? false
+        speed: 5,
+        intensity: 4,
+        reverse: false
       }
     },
     [`flags.${MODULE_ID}.${FLAG_KEY}`]: {
       active: true,
+      lightId: null,
+      luminosity: appearance.luminosity,
       priorLight
     }
   });
@@ -382,6 +586,8 @@ async function lightTorch(tokenDoc, bright, dim, animation = DEFAULT_ANIMATION) 
  * @returns {Promise<void>}
  */
 async function extinguishTorch(tokenDoc) {
+  await deleteLegacyTorchAmbientLight(tokenDoc);
+
   const state = getTorchState(tokenDoc);
   const prior = state.priorLight && typeof state.priorLight === "object"
     ? foundry.utils.duplicate(state.priorLight)
@@ -391,7 +597,9 @@ async function extinguishTorch(tokenDoc) {
     light: prior,
     [`flags.${MODULE_ID}.${FLAG_KEY}`]: {
       active: false,
-      priorLight: null
+      lightId: null,
+      priorLight: null,
+      luminosity: null
     }
   });
 }

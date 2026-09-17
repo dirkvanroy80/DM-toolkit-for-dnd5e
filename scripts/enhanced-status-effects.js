@@ -22,6 +22,10 @@ export function registerEnhancedStatusEffects() {
   Hooks.on("renderSettingsConfig", onRenderSettingsConfig);
   Hooks.on("renderTokenHUD", onRenderTokenHUD);
   Hooks.on("renderTokenHUD5e", onRenderTokenHUD);
+  // dnd5e only creates Separate Status Conditions on effect create while active —
+  // not when enabling a sheet effect later. Bridge that gap (independent of the setting).
+  Hooks.on("createActiveEffect", onCreateActiveEffectRiders);
+  Hooks.on("updateActiveEffect", onUpdateActiveEffectRiders);
 }
 
 export function registerEnhancedStatusEffectsSettings() {
@@ -437,6 +441,38 @@ async function ensureRiderConditions(effect) {
   if (toCreate.length) {
     await ActiveEffectCls.createDocuments(toCreate, { keepId: true, parent: effect.parent });
   }
+}
+
+/**
+ * @param {ActiveEffect} effect
+ * @param {object} _data
+ * @param {object} _options
+ * @param {string} userId
+ */
+function onCreateActiveEffectRiders(effect, _data, _options, userId) {
+  if (game.userId !== userId) return;
+  void ensureRiderConditions(effect);
+}
+
+/**
+ * Apply Separate Status Conditions when an effect is enabled, or when riders are edited
+ * onto an already-active effect. (dnd5e only does this on create-while-active.)
+ * @param {ActiveEffect} effect
+ * @param {object} change
+ * @param {object} _options
+ * @param {string} userId
+ */
+function onUpdateActiveEffectRiders(effect, change, _options, userId) {
+  if (game.userId !== userId) return;
+  if (!(effect.parent instanceof Actor)) return;
+  if (!effect.active) return;
+
+  const becomingEnabled = "disabled" in change && change.disabled === false;
+  const ridersChanged = foundry.utils.hasProperty(change, "flags.dnd5e.riders")
+    || foundry.utils.hasProperty(change, "system.rider");
+  if (!becomingEnabled && !ridersChanged) return;
+
+  void ensureRiderConditions(effect);
 }
 
 /**
