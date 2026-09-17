@@ -38,6 +38,7 @@ import {
   registerTokenTorch,
   registerTokenTorchSettings
 } from "./token-torch.js";
+import { registerTraps, registerTrapsSettings } from "./traps.js";
 
 const MODULE_ID = "DM-toolkit-for-dnd5e";
 
@@ -47,6 +48,7 @@ registerGmTransparentFog();
 registerHideBloodied();
 registerTokenAuras();
 registerPortals();
+registerTraps();
 registerSilentDmRolls();
 registerEnhancedStatusEffects();
 registerTokenTorch();
@@ -63,6 +65,7 @@ Hooks.once("init", () => {
   registerHideBloodiedSettings();
   registerExtendedExpirationSettings();
   registerPortalsSettings();
+  registerTrapsSettings();
 });
 
 Hooks.once("setup", () => {

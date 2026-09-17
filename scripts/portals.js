@@ -460,7 +460,7 @@ function onGetSceneControlButtons(controls) {
   controls.portals = {
     name: "portals",
     title: "DM-TOOLKIT-DND5E.Portals.Control",
-    icon: "fa-solid fa-wand-magic-sparkles",
+    icon: "fa-solid fa-right-left",
     layer: "tokens",
     visible: true,
     order: notesOrder + 1,

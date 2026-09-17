@@ -4,10 +4,11 @@ A Foundry VTT module with optional DM-focused tools for the **dnd5e** system. Fe
 
 STILL IN TESTING PHASE!
 
-latest manifest: https://github.com/dirkvanroy80/DM-toolkit-for-dnd5e/releases/0.1.0/download/module.json
+latest manifest: https://github.com/dirkvanroy80/DM-toolkit-for-dnd5e/releases/0.2.0/download/module.json
 
 **Compatibility:** 
 - v0.1.0: Foundry VTT 14 (verified 14.367), dnd5e 6.0.0
+- v0.2.0: Foundry VTT 14 (verified 14.367), dnd5e 6.0.0
 
 Most features are **off by default**. Enable what you need under **Configure Settings → Module Settings → DM Toolkit D&D 5e**.
 
@@ -54,7 +55,7 @@ Draws a filled circle aura around tokens.
 
 ### Silent DM rolls
 
-When enabled, the dice sound does not play for rolls made by the GM. Player rolls are unchanged.
+When enabled, rolls made by the GM do not play the dice sound. If the chat/roll mode is **Private GM Roll** (private to gamemasters), the roll message stays GM-only and is hidden from players. Public rolls (for example `/roll`) remain visible to players. Player rolls are unchanged.
 
 ---
 
@@ -108,6 +109,26 @@ Appearance settings:
 | **Portal border thickness** | Border width in pixels (1–20) |
 
 Portal options (per portal) include whether it can be entered, activation button, and player visibility.
+
+---
+
+### Traps
+
+GM scene tools to paint trap squares on the canvas (borders are GM-only).
+
+1. Enable **Traps**.
+2. Use the **Traps** scene control → **Create new trap**.
+3. Fill in the name, optional **Pause game**, optional **Disable trap after trigger**, optional tile to reveal, and optional macro.
+4. Click or drag grid squares, then **Create trap** (name must be unique; at least one square required).
+
+When a token moves onto or over a trap square, movement stops on the trap, a chat message posts (“A trap was triggered”), and configured pause / tile / macro effects run (via the GM). If **Disable trap after trigger** was set, the trap turns off until re-enabled in **Manage traps**.
+
+Appearance settings:
+
+| Setting | Purpose |
+| --- | --- |
+| **Trap border color** | Border color for all traps (GM only) |
+| **Trap border thickness** | Border width in pixels (1–20) |
 
 ---
 
