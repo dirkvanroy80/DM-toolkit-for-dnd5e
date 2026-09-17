@@ -90,8 +90,7 @@ function isFeatureEnabled() {
  * @param {HTMLElement} html
  */
 function onRenderSettingsConfig(_app, html) {
-  const root = html instanceof HTMLElement ? html : html?.[0];
-  if (!root) return;
+  if (!(html instanceof HTMLElement)) return;
   const enabled = isFeatureEnabled();
   // Core SettingsConfig: menu buttons / form groups for registerMenu entries.
   const selectors = [
@@ -100,7 +99,7 @@ function onRenderSettingsConfig(_app, html) {
     `[name="${MODULE_ID}.${MENU_KEY}"]`
   ];
   for (const selector of selectors) {
-    for (const el of root.querySelectorAll(selector)) {
+    for (const el of html.querySelectorAll(selector)) {
       const row = el.closest(".form-group") ?? el;
       row.hidden = !enabled;
     }
@@ -114,7 +113,7 @@ function getConditions() {
   try {
     const raw = game.settings.get(MODULE_ID, DATA_SETTING);
     const list = Array.isArray(raw?.conditions) ? raw.conditions : [];
-    return foundry.utils.duplicate(list).map(c => ({
+    return foundry.utils.deepClone(list).map(c => ({
       id: String(c.id ?? ""),
       name: String(c.name ?? ""),
       img: normalizeConditionImg(c.img),
@@ -337,10 +336,6 @@ async function buildEffectDataForCondition(condition, actor = null) {
   const flags = {
     [MODULE_ID]: moduleFlags
   };
-  // Older dnd5e stores Separate Status Conditions here; migrateData may move them to system.rider.
-  if (riderStatuses.length) {
-    flags.dnd5e = { riders: { statuses: riderStatuses } };
-  }
 
   // Minimal payload — avoid cloning template duration/expiry/filters that break application.
   // Aura + rider statuses are copied so applied effects match the linked template.
@@ -369,20 +364,19 @@ async function buildEffectDataForCondition(condition, actor = null) {
 
 /**
  * Separate Status Conditions (dnd5e riders) from a template / applied effect / cache.
- * Supports both legacy flags.dnd5e.riders.statuses and system.rider.statuses (dnd5e 6+).
+ * Prefers system.rider.statuses; still reads flags.dnd5e.riders for older saved effects.
  * @param {ActiveEffect|object|null} source
  * @returns {string[]}
  */
 function extractRiderStatuses(source) {
   if (!source) return [];
-  let raw = null;
-  if (typeof source.getFlag === "function") {
+  let raw = foundry.utils.getProperty(source, "system.rider.statuses")
+    ?? foundry.utils.getProperty(source, "_source.system.rider.statuses");
+  if (raw == null && typeof source.getFlag === "function") {
     raw = source.getFlag("dnd5e", "riders.statuses");
   }
   if (raw == null) {
-    raw = foundry.utils.getProperty(source, "system.rider.statuses")
-      ?? foundry.utils.getProperty(source, "_source.system.rider.statuses")
-      ?? foundry.utils.getProperty(source, "flags.dnd5e.riders.statuses")
+    raw = foundry.utils.getProperty(source, "flags.dnd5e.riders.statuses")
       ?? foundry.utils.getProperty(source, "_source.flags.dnd5e.riders.statuses");
   }
   if (raw instanceof Set) return Array.from(raw).map(String).filter(Boolean);
@@ -404,17 +398,7 @@ async function ensureRiderConditions(effect) {
   const missing = riders.filter(id => !effect.parent.effects.get(dnd5eConditionEffectId(id)));
   if (!missing.length) return;
 
-  // Legacy / deprecated wrapper — skips statuses that already exist on the actor.
-  if (typeof effect.createRiderConditions === "function") {
-    try {
-      await effect.createRiderConditions();
-      return;
-    } catch (err) {
-      console.warn(`${MODULE_ID} | createRiderConditions failed; falling back`, err);
-    }
-  }
-
-  // dnd5e 6+: batch API when the deprecated wrapper is gone.
+  // Prefer dnd5e system batch API when available.
   if (typeof effect.system?.collectRiders === "function") {
     try {
       const batch = await effect.system.collectRiders();
@@ -424,6 +408,15 @@ async function ensureRiderConditions(effect) {
       }
     } catch (err) {
       console.warn(`${MODULE_ID} | collectRiders failed; falling back`, err);
+    }
+  }
+
+  if (typeof effect.createRiderConditions === "function") {
+    try {
+      await effect.createRiderConditions();
+      return;
+    } catch (err) {
+      console.warn(`${MODULE_ID} | createRiderConditions failed; falling back`, err);
     }
   }
 
@@ -561,7 +554,7 @@ function onRenderActorSheet(app, element) {
   const actor = app?.actor ?? app?.document;
   if (!actor || actor.documentName !== "Actor") return;
 
-  const root = element instanceof HTMLElement ? element : element?.[0];
+  const root = element instanceof HTMLElement ? element : null;
   if (!root) return;
 
   // Avoid duplicate injection on partial re-renders.
@@ -587,7 +580,7 @@ function onRenderActorSheet(app, element) {
  */
 function onRenderTokenHUD(app, element) {
   if (!isFeatureEnabled()) return;
-  const root = element instanceof HTMLElement ? element : element?.[0] ?? app?.element;
+  const root = element instanceof HTMLElement ? element : (app?.element instanceof HTMLElement ? app.element : null);
   if (!root) return;
 
   const button = root.querySelector('[data-action="togglePalette"][data-palette="effects"]');
@@ -675,7 +668,7 @@ function getCoreConditionEntries(actor) {
     return {
       id,
       name: localizeConditionName(config, id),
-      img: existing?.img || config.img || config.icon || "icons/svg/aura.svg",
+      img: existing?.img || config.img || "icons/svg/aura.svg",
       active,
       level: hasConditionLevels(id) ? (actor.system?.conditions?.[id] ?? 0) : null,
       reference: config.reference || null,

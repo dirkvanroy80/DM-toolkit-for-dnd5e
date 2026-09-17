@@ -64,6 +64,74 @@ export function registerPortals() {
 
 const PORTAL_SOCKET = `module.${MODULE_ID}`;
 
+/** @type {Map<string, Promise<void>>} */
+const pendingSceneViews = new Map();
+
+/**
+ * Wait until Foundry will allow a scene switch (no mid-load view()).
+ * @returns {Promise<void>}
+ */
+async function waitForCanvasIdle() {
+  const isBusy = () => Boolean(canvas?.loading) || (Boolean(canvas?.scene) && canvas.ready === false);
+  if (!isBusy()) return;
+
+  await Promise.race([
+    new Promise(resolve => {
+      const onReady = () => {
+        Hooks.off("canvasReady", onReady);
+        resolve();
+      };
+      Hooks.on("canvasReady", onReady);
+      if (!isBusy()) {
+        Hooks.off("canvasReady", onReady);
+        resolve();
+      }
+    }),
+    new Promise(resolve => setTimeout(resolve, 20000))
+  ]);
+
+  // Let Foundry clear its internal loading lock after canvasReady.
+  if (isBusy()) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+}
+
+/**
+ * View a scene only when the canvas is free. Coalesces concurrent pulls for the same scene
+ * (createToken + socket both try to pull players after a cross-scene teleport).
+ * @param {Scene|null|undefined} scene
+ * @returns {Promise<void>}
+ */
+async function safeViewScene(scene) {
+  if (!scene) return;
+  if (canvas?.scene?.id === scene.id && canvas.ready && !canvas.loading) return;
+
+  const existing = pendingSceneViews.get(scene.id);
+  if (existing) return existing;
+
+  const job = (async () => {
+    try {
+      await waitForCanvasIdle();
+      if (canvas?.scene?.id === scene.id) return;
+      await scene.view();
+    } catch (err) {
+      console.warn(`${MODULE_ID} | Scene view deferred; retrying`, err);
+      await waitForCanvasIdle();
+      if (canvas?.scene?.id === scene.id) return;
+      try {
+        await scene.view();
+      } catch (err2) {
+        console.warn(`${MODULE_ID} | Scene view failed`, err2);
+      }
+    } finally {
+      pendingSceneViews.delete(scene.id);
+    }
+  })();
+
+  pendingSceneViews.set(scene.id, job);
+  return job;
+}
+
 /**
  * Whether this client should perform privileged portal document ops.
  * @returns {boolean}
@@ -85,7 +153,7 @@ function registerPortalSocket() {
       // GMs keep their current view; only player owners are pulled.
       if (game.user.isGM) return;
       const scene = game.scenes.get(data.sceneId);
-      if (scene && canvas?.scene?.id !== scene.id) scene.view();
+      void safeViewScene(scene);
       return;
     }
 
@@ -134,7 +202,7 @@ function onCreateTokenPortalPull(tokenDoc, options) {
     || Boolean(tokenDoc.getFlag?.(MODULE_ID, TRANSIT_FLAG));
   if (!fromPortal) return;
   const scene = tokenDoc.parent;
-  if (scene && canvas?.scene?.id !== scene.id) scene.view();
+  void safeViewScene(scene);
 }
 
 export function registerPortalsSettings() {
@@ -203,7 +271,7 @@ function getPortalsSettingData() {
     const raw = game.settings.get(MODULE_ID, PORTALS_SETTING);
     if (Array.isArray(raw)) {
       return {
-        entries: foundry.utils.duplicate(raw),
+        entries: foundry.utils.deepClone(raw),
         borderColor: DEFAULT_BORDER_COLOR,
         borderWidth: DEFAULT_BORDER_WIDTH,
         hasAppearance: false
@@ -212,7 +280,7 @@ function getPortalsSettingData() {
     const hasAppearance = raw != null
       && (raw.borderColor != null || raw.borderWidth != null);
     return {
-      entries: Array.isArray(raw?.entries) ? foundry.utils.duplicate(raw.entries) : [],
+      entries: Array.isArray(raw?.entries) ? foundry.utils.deepClone(raw.entries) : [],
       borderColor: normalizeColorCss(raw?.borderColor) || DEFAULT_BORDER_COLOR,
       borderWidth: clampBorderWidth(raw?.borderWidth),
       hasAppearance
@@ -1590,7 +1658,11 @@ class PortalManageApp extends foundry.applications.api.ApplicationV2 {
       selected: false
     }));
     const collator = new Intl.Collator(game.i18n.lang || undefined, { sensitivity: "base", numeric: true });
+    const openSceneId = canvas?.scene?.id ?? null;
     mapped.sort((a, b) => {
+      const aOpen = openSceneId && a.sceneId === openSceneId ? 0 : 1;
+      const bOpen = openSceneId && b.sceneId === openSceneId ? 0 : 1;
+      if (aOpen !== bOpen) return aOpen - bOpen;
       const byScene = collator.compare(a.sceneName, b.sceneName);
       if (byScene) return byScene;
       return collator.compare(String(a.name ?? ""), String(b.name ?? ""));
@@ -1863,7 +1935,7 @@ async function viewSceneForTokenOwners(destScene, tokenDoc) {
     if (!user?.active || user.isGM) continue;
 
     if (userId === game.user.id) {
-      if (canvas?.scene?.id !== destScene.id) await destScene.view();
+      await safeViewScene(destScene);
     } else {
       game.socket.emit(PORTAL_SOCKET, { type: "viewScene", sceneId: destScene.id, userId });
     }
@@ -1969,25 +2041,30 @@ async function teleportTokenThroughPortal(tokenDoc, portal, sourceCell, options 
   }
 
   const sameScene = tokenDoc.parent?.id === destScene.id;
+  const { x: destX, y: destY } = getTokenPositionForCell(destScene, tokenDoc, destCell);
 
-  // Players usually cannot create/delete tokens — ask the primary GM.
-  if (!options.asGM && !canCrossSceneTeleport()) {
-    const gmOnline = game.users.some(u => u.isGM && u.active);
-    if (!gmOnline) {
-      ui.notifications.error(game.i18n.localize("DM-TOOLKIT-DND5E.Portals.ErrNeedGM"));
+  // Same-scene: move in place (keeps token id). Owners can do this themselves.
+  if (sameScene) {
+    const canUpdate = options.asGM || tokenDoc.canUserModify?.(game.user, "update");
+    if (!canUpdate) {
+      await requestGmTeleport(tokenDoc, portal, sourceCell);
       return;
     }
-    transitUntil.set(tokenDoc, Date.now() + 2000);
-    game.socket.emit(PORTAL_SOCKET, {
-      type: "requestTeleport",
-      tokenUuid: tokenDoc.uuid,
-      portalId: portal.id,
-      sourceCell
-    });
+    transitUntil.set(tokenDoc, Date.now() + 1500);
+    try {
+      await tokenDoc.update({ x: destX, y: destY }, { dmToolkitPortalSkip: true });
+    } catch (err) {
+      console.error(`${MODULE_ID} | Portal teleport failed`, err);
+      ui.notifications.error(game.i18n.localize("DM-TOOLKIT-DND5E.Portals.ErrTeleportFailed"));
+    }
     return;
   }
 
-  const { x: destX, y: destY } = getTokenPositionForCell(destScene, tokenDoc, destCell);
+  // Cross-scene needs TOKEN_CREATE + TOKEN_DELETE — players usually ask the primary GM.
+  if (!options.asGM && !canCrossSceneTeleport()) {
+    await requestGmTeleport(tokenDoc, portal, sourceCell);
+    return;
+  }
 
   transitUntil.set(tokenDoc, Date.now() + 1500);
 
@@ -1998,7 +2075,6 @@ async function teleportTokenThroughPortal(tokenDoc, portal, sourceCell, options 
   } catch (_err) { /* ignore */ }
 
   try {
-    const ownerIds = sameScene ? [] : getTokenOwnerUserIds(tokenDoc);
     const data = tokenDoc.toObject();
     delete data._id;
     data.x = destX;
@@ -2008,14 +2084,8 @@ async function teleportTokenThroughPortal(tokenDoc, portal, sourceCell, options 
     await tokenDoc.delete({ dmToolkitPortalSkip: true });
     if (created) transitUntil.set(created, Date.now() + 1500);
 
-    // Cross-scene only: pull player owners to the destination scene.
-    if (!sameScene) {
-      await viewSceneForTokenOwners(destScene, created ?? tokenDoc);
-      for (const userId of ownerIds) {
-        if (userId === game.user.id) continue;
-        game.socket.emit(PORTAL_SOCKET, { type: "viewScene", sceneId: destScene.id, userId });
-      }
-    }
+    // Pull player owners (local view + one socket each). createToken also pulls; safeViewScene coalesces.
+    await viewSceneForTokenOwners(destScene, created ?? tokenDoc);
   } catch (err) {
     console.error(`${MODULE_ID} | Portal teleport failed`, err);
     ui.notifications.error(game.i18n.localize("DM-TOOLKIT-DND5E.Portals.ErrTeleportFailed"));
@@ -2029,4 +2099,25 @@ async function teleportTokenThroughPortal(tokenDoc, portal, sourceCell, options 
       } catch (_err) { /* ignore */ }
     }, 1600);
   }
+}
+
+/**
+ * Ask the primary GM to perform a privileged portal teleport.
+ * @param {TokenDocument} tokenDoc
+ * @param {object} portal
+ * @param {{i:number,j:number}} sourceCell
+ */
+async function requestGmTeleport(tokenDoc, portal, sourceCell) {
+  const gmOnline = game.users.some(u => u.isGM && u.active);
+  if (!gmOnline) {
+    ui.notifications.error(game.i18n.localize("DM-TOOLKIT-DND5E.Portals.ErrNeedGM"));
+    return;
+  }
+  transitUntil.set(tokenDoc, Date.now() + 2000);
+  game.socket.emit(PORTAL_SOCKET, {
+    type: "requestTeleport",
+    tokenUuid: tokenDoc.uuid,
+    portalId: portal.id,
+    sourceCell
+  });
 }

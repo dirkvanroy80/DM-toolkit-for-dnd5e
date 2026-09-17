@@ -547,7 +547,7 @@ async function deleteLegacyTorchAmbientLight(tokenDoc) {
 async function lightTorch(tokenDoc, bright, dim, animation = DEFAULT_ANIMATION, luminosity) {
   await deleteLegacyTorchAmbientLight(tokenDoc);
 
-  const priorLight = foundry.utils.duplicate(tokenDoc.toObject().light ?? {});
+  const priorLight = foundry.utils.deepClone(tokenDoc.toObject().light ?? {});
   const animationType = animation === undefined ? DEFAULT_ANIMATION : animation;
   const appearance = getTorchLightAppearance(luminosity);
 
@@ -590,7 +590,7 @@ async function extinguishTorch(tokenDoc) {
 
   const state = getTorchState(tokenDoc);
   const prior = state.priorLight && typeof state.priorLight === "object"
-    ? foundry.utils.duplicate(state.priorLight)
+    ? foundry.utils.deepClone(state.priorLight)
     : { bright: 0, dim: 0, animation: { type: null } };
 
   await tokenDoc.update({

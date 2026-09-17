@@ -1,0 +1,34 @@
+---
+description: Use Foundry V13+ APIs only (no pre-V13 legacy)
+alwaysApply: true
+---
+
+# Foundry V13+ only
+
+This module targets Foundry **13+** (verified on **14**). Do not use, write, or add compatibility shims for pre-V13 APIs.
+
+## ActiveEffect
+
+- Use `effect.start.round` / `turn` / `combat` / `time` — never `duration.startRound`, `duration.startTurn`, `duration.startTime`, or `duration.combat`
+- Duration field is `duration.units` (plural), not `duration.unit`
+- Time units are `turns` / `rounds`, not singular `turn` / `round`
+
+## Applications & hooks
+
+- Prefer `ApplicationV2` / `DialogV2` and `foundry.applications.*`
+- Use `renderChatMessageHTML` — not `renderChatMessage`
+- Treat render hooks as receiving `HTMLElement`, not jQuery
+
+## Utilities & documents
+
+- Use `foundry.utils.deepClone` — not `foundry.utils.duplicate`
+- ChatMessage author is `message.author` — not `message.user`
+- Private GM roll mode via `CONST.DICE_ROLL_MODES.PRIVATE` / `CONFIG.ChatMessage.modes` — not `"gmroll"`
+
+## dnd5e
+
+- Prefer `system.rider.statuses` over writing `flags.dnd5e.riders`
+- Prefer modern rider APIs (`collectRiders`) over deprecated wrappers when both exist
+- Status/condition images use `img`, not `icon`
+
+Do not add dual legacy/modern code paths “just in case.” Target current Foundry + dnd5e only.

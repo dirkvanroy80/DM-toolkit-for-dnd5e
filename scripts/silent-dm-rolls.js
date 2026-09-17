@@ -20,7 +20,6 @@ export function registerSilentDmRolls() {
 
   Hooks.on("preCreateChatMessage", onPreCreateChatMessage);
   Hooks.on("renderChatMessageHTML", onRenderChatMessageHTML);
-  Hooks.on("renderChatMessage", onRenderChatMessageLegacy);
 }
 
 export function registerSilentDmRollsSettings() {
@@ -61,7 +60,14 @@ function getGmMessageMode() {
   const modes = CONFIG.ChatMessage?.modes;
   if (modes?.gm) return "gm";
   if (modes?.private) return "private";
-  return CONST.DICE_ROLL_MODES?.PRIVATE ?? "gmroll";
+  return CONST.DICE_ROLL_MODES?.PRIVATE ?? "private";
+}
+
+/**
+ * @returns {string}
+ */
+function getPrivateDiceRollMode() {
+  return CONST.DICE_ROLL_MODES?.PRIVATE ?? "private";
 }
 
 /**
@@ -83,8 +89,7 @@ function isPrivateToGamemastersMode(options, message, data) {
     const mode = inferModeFromMessage({
       whisper,
       blind: data?.blind ?? message?.blind,
-      author: message?.author,
-      user: message?.user
+      author: message?.author
     });
     return mode === "gm" || mode === "blind";
   }
@@ -100,13 +105,11 @@ function isPrivateToGamemastersMode(options, message, data) {
  */
 function isGmPrivateModeValue(mode) {
   if (mode == null) return false;
-  const privateMode = CONST.DICE_ROLL_MODES?.PRIVATE ?? "gmroll";
+  const privateMode = String(getPrivateDiceRollMode()).toLowerCase();
   const m = String(mode).toLowerCase();
   return m === "gm"
     || m === "private"
-    || m === "gmroll"
-    || m === String(privateMode).toLowerCase()
-    || m.includes("gmroll")
+    || m === privateMode
     || m === "privategm"
     || m === "private-gm";
 }
@@ -120,7 +123,8 @@ function inferModeFromMessage(message) {
   if (!whisper.length) return "public";
   const allGm = whisper.every(id => game.users.get(id)?.isGM);
   if (allGm) return message.blind ? "blind" : "gm";
-  if (whisper.length === 1 && whisper[0] === (message.author?.id ?? message.user)) return "self";
+  const authorId = message.author?.id ?? message.author;
+  if (whisper.length === 1 && whisper[0] === authorId) return "self";
   return "whisper";
 }
 
@@ -142,11 +146,7 @@ function safeSetting(namespace, key) {
  * @returns {string|null}
  */
 function getMessageAuthorId(message) {
-  return message?.author?.id
-    ?? message?.author
-    ?? message?.user?.id
-    ?? message?.user
-    ?? null;
+  return message?.author?.id ?? message?.author ?? null;
 }
 
 /**
@@ -208,7 +208,7 @@ function applySilentDmRollEffects(message, data, options, userOrId) {
       const mode = getGmMessageMode();
       if (options && typeof options === "object") {
         options.messageMode = mode;
-        options.rollMode = CONST.DICE_ROLL_MODES?.PRIVATE ?? "gmroll";
+        options.rollMode = getPrivateDiceRollMode();
       }
       try {
         if (typeof message.applyMode === "function") message.applyMode(mode);
@@ -216,7 +216,7 @@ function applySilentDmRollEffects(message, data, options, userOrId) {
       try {
         if (typeof ChatMessage.applyMode === "function") ChatMessage.applyMode(patch, mode);
         else if (typeof ChatMessage.applyRollMode === "function") {
-          ChatMessage.applyRollMode(patch, CONST.DICE_ROLL_MODES?.PRIVATE ?? "gmroll");
+          ChatMessage.applyRollMode(patch, getPrivateDiceRollMode());
         }
       } catch (_err) { /* keep explicit */ }
       patch.whisper = whisper;
@@ -290,7 +290,7 @@ function wrapRollToMessage(RollCls) {
         const mode = getGmMessageMode();
         const whisper = getGmUserIds();
         options.messageMode = mode;
-        options.rollMode = CONST.DICE_ROLL_MODES?.PRIVATE ?? "gmroll";
+        options.rollMode = getPrivateDiceRollMode();
         messageData.whisper = whisper;
         messageData.blind = false;
         foundry.utils.setProperty(messageData, `flags.${MODULE_ID}.${FLAG_KEY}`, true);
@@ -326,29 +326,10 @@ function onPreCreateChatMessage(message, data, options, userId) {
  */
 function onRenderChatMessageHTML(message, html) {
   if (!shouldHideRollFromCurrentUser(message)) return;
-  const el = html instanceof HTMLElement ? html : html?.[0];
-  if (!el) return;
-  el.hidden = true;
-  el.style.display = "none";
-  el.remove();
-}
-
-/**
- * @param {ChatMessage} message
- * @param {JQuery|HTMLElement} html
- */
-function onRenderChatMessageLegacy(message, html) {
-  if (!shouldHideRollFromCurrentUser(message)) return;
-  if (html?.hide) html.hide();
-  else if (html instanceof HTMLElement) {
-    html.hidden = true;
-    html.style.display = "none";
-    html.remove();
-  } else if (html?.[0]) {
-    html[0].hidden = true;
-    html[0].style.display = "none";
-    html[0].remove();
-  }
+  if (!(html instanceof HTMLElement)) return;
+  html.hidden = true;
+  html.style.display = "none";
+  html.remove();
 }
 
 /**

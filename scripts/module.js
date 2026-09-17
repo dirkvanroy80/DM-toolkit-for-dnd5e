@@ -134,15 +134,15 @@ function wrapPrepareTurnContext(cls) {
 /**
  * Fallback: rewrite visible names and alt text after render.
  * @param {foundry.applications.sidebar.tabs.CombatTracker} app
- * @param {HTMLElement|JQuery} element
+ * @param {HTMLElement} element
  */
 function maskTrackerElement(app, element) {
   if (!isHideCombatantNamesEnabled()) return;
   if (game.user?.isGM) return;
 
-  const root = getHtmlRoot(element) ?? app.element;
+  const root = element instanceof HTMLElement ? element : app.element;
   const combat = app.viewed;
-  if (!root || !combat) return;
+  if (!(root instanceof HTMLElement) || !combat) return;
 
   const replacement = getReplacementName();
   for (const row of root.querySelectorAll("[data-combatant-id]")) {
@@ -162,17 +162,6 @@ function maskTrackerElement(app, element) {
       }
     }
   }
-}
-
-/**
- * @param {HTMLElement|JQuery} element
- * @returns {HTMLElement|null}
- */
-function getHtmlRoot(element) {
-  if (!element) return null;
-  if (element instanceof HTMLElement) return element;
-  if (typeof element[0] !== "undefined") return element[0];
-  return null;
 }
 
 /**

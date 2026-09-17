@@ -160,12 +160,12 @@ function coerceEnabled(value) {
 
 /**
  * @param {TokenConfig|PrototypeTokenConfig} app
- * @param {HTMLElement|JQuery} html
+ * @param {HTMLElement} html
  */
 function onRenderTokenConfig(app, html) {
   if (!isAurasFeatureEnabled()) return;
 
-  const root = html instanceof HTMLElement ? html : html?.[0];
+  const root = html instanceof HTMLElement ? html : null;
   if (!root) return;
 
   const nav = findTabNav(root);
@@ -369,12 +369,12 @@ function bindAuraAlphaLabel(root) {
 
 /**
  * @param {ActiveEffectConfig} app
- * @param {HTMLElement|JQuery} html
+ * @param {HTMLElement} html
  */
 function onRenderActiveEffectConfig(app, html) {
   if (!isAurasFeatureEnabled()) return;
 
-  const root = html instanceof HTMLElement ? html : html?.[0];
+  const root = html instanceof HTMLElement ? html : null;
   if (!root || root.querySelector(".dm-toolkit-effect-aura")) return;
 
   const changesTab = findEffectChangesTab(root);

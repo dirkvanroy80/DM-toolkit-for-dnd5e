@@ -156,7 +156,7 @@ function getTrapsSettingData() {
     const raw = game.settings.get(MODULE_ID, TRAPS_SETTING);
     if (Array.isArray(raw)) {
       return {
-        entries: foundry.utils.duplicate(raw),
+        entries: foundry.utils.deepClone(raw),
         borderColor: DEFAULT_BORDER_COLOR,
         borderWidth: DEFAULT_BORDER_WIDTH,
         hasAppearance: false
@@ -165,7 +165,7 @@ function getTrapsSettingData() {
     const hasAppearance = raw != null
       && (raw.borderColor != null || raw.borderWidth != null);
     return {
-      entries: Array.isArray(raw?.entries) ? foundry.utils.duplicate(raw.entries) : [],
+      entries: Array.isArray(raw?.entries) ? foundry.utils.deepClone(raw.entries) : [],
       borderColor: normalizeColorCss(raw?.borderColor) || DEFAULT_BORDER_COLOR,
       borderWidth: clampBorderWidth(raw?.borderWidth),
       hasAppearance

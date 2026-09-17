@@ -486,7 +486,7 @@ export function getAppliedSaveIds(effect, ability) {
 export async function setAppliedSaveIds(effect, ability, ids) {
   const raw = effect.getFlag?.(MODULE_ID, APPLIED_SAVE_IDS_FLAG);
   const map = (raw && typeof raw === "object" && !Array.isArray(raw))
-    ? foundry.utils.duplicate(raw)
+    ? foundry.utils.deepClone(raw)
     : {};
   map[ability] = ids;
   await effect.setFlag(MODULE_ID, APPLIED_SAVE_IDS_FLAG, map);
@@ -511,7 +511,7 @@ export function getAppliedCheckIds(effect, ability) {
 export async function setAppliedCheckIds(effect, ability, ids) {
   const raw = effect.getFlag?.(MODULE_ID, APPLIED_CHECK_IDS_FLAG);
   const map = (raw && typeof raw === "object" && !Array.isArray(raw))
-    ? foundry.utils.duplicate(raw)
+    ? foundry.utils.deepClone(raw)
     : {};
   map[ability] = ids;
   await effect.setFlag(MODULE_ID, APPLIED_CHECK_IDS_FLAG, map);
@@ -536,7 +536,7 @@ export function getAppliedSkillIds(effect, skill) {
 export async function setAppliedSkillIds(effect, skill, ids) {
   const raw = effect.getFlag?.(MODULE_ID, APPLIED_SKILL_IDS_FLAG);
   const map = (raw && typeof raw === "object" && !Array.isArray(raw))
-    ? foundry.utils.duplicate(raw)
+    ? foundry.utils.deepClone(raw)
     : {};
   map[skill] = ids;
   await effect.setFlag(MODULE_ID, APPLIED_SKILL_IDS_FLAG, map);
@@ -621,7 +621,7 @@ function normalizeCondition(raw) {
     return { mode, expiry };
   }
   const value = Math.max(0, Math.floor(Number(raw.value)) || 0);
-  const units = typeof raw.units === "string" ? raw.units : "";
+  const units = normalizeTimeUnit(typeof raw.units === "string" ? raw.units : "") || (typeof raw.units === "string" ? raw.units : "");
   return { mode, value, units };
 }
 
@@ -715,6 +715,27 @@ function wrapActiveEffectConfigSubmit() {
 }
 
 /**
+ * @param {string} unit
+ * @returns {boolean}
+ */
+function isTimeDurationUnit(unit) {
+  const u = normalizeTimeUnit(unit);
+  return u === "turns" || u === "rounds" || u === "seconds" || u === "minutes"
+    || u === "hours" || u === "days" || u === "months" || u === "years";
+}
+
+/**
+ * Normalize singular Foundry/stock unit ids to plural schema values.
+ * @param {string} unit
+ * @returns {string}
+ */
+function normalizeTimeUnit(unit) {
+  if (unit === "turn") return "turns";
+  if (unit === "round") return "rounds";
+  return typeof unit === "string" ? unit : "";
+}
+
+/**
  * @param {object} submitData
  * @param {HTMLElement} form
  */
@@ -724,17 +745,34 @@ function applyEndConditionsToSubmit(submitData, form) {
   // Only rewrite duration when our End Effect controls are present in the submitted form.
   if (!(form instanceof HTMLElement) || !form.querySelector(".dm-toolkit-end-condition")) return;
 
-  const conditions = parseEndConditionsFromForm(form);
+  const conditions = parseEndConditionsFromForm(form).map(c => {
+    if (!c || c.mode !== MODE_AFTER) return c;
+    return { ...c, units: normalizeTimeUnit(c.units) || c.units };
+  });
   foundry.utils.setProperty(submitData, `flags.${MODULE_ID}.${END_CONDITIONS_FLAG}`, conditions);
 
   // Ensure Foundry persists a real array (numeric-key objects break OR evaluation).
   const flagPath = `flags.${MODULE_ID}.${END_CONDITIONS_FLAG}`;
   foundry.utils.setProperty(submitData, flagPath, conditions.slice());
 
-  // Prevent Foundry from AND-ing native duration + expiry against our OR model.
-  foundry.utils.setProperty(submitData, "duration.value", null);
-  foundry.utils.setProperty(submitData, "duration.units", "");
+  // Never AND native expiry with our OR On-Event rows.
   foundry.utils.setProperty(submitData, "duration.expiry", null);
+
+  // Restore native duration for time-based After rows so Foundry tracks remaining turns/rounds.
+  // Custom units (attacks/damage/…) stay flag-only; mixed time units rely on custom evaluation.
+  const timeAfter = conditions.filter(c =>
+    c.mode === MODE_AFTER && isTimeDurationUnit(c.units) && Number(c.value) > 0
+  );
+  const timeUnits = new Set(timeAfter.map(c => normalizeTimeUnit(c.units)));
+  if (timeAfter.length && timeUnits.size === 1) {
+    const unit = [...timeUnits][0];
+    const value = Math.min(...timeAfter.map(c => Number(c.value)));
+    foundry.utils.setProperty(submitData, "duration.value", value);
+    foundry.utils.setProperty(submitData, "duration.units", unit);
+  } else {
+    foundry.utils.setProperty(submitData, "duration.value", null);
+    foundry.utils.setProperty(submitData, "duration.units", "");
+  }
 
   const attackMaxes = conditions
     .filter(c => c.mode === MODE_AFTER && c.units === ATTACKS_UNIT)
@@ -853,36 +891,40 @@ function normalizeEndConditionsInChange(data) {
 }
 
 /**
+ * Stamp Foundry V13+ `start` markers (combat round/turn/time) for After checks.
  * @param {object} data
  * @param {ActiveEffect} [effect]
  */
 function stampDurationStart(data, effect = null) {
   if (!data || typeof data !== "object") return;
 
-  const duration = foundry.utils.getProperty(data, "duration") ?? {};
-  const existing = effect?.duration ?? {};
+  const start = foundry.utils.getProperty(data, "start") ?? {};
+  const existing = effect?.start ?? {};
   const patch = {};
 
-  if (duration.startTime == null && existing.startTime == null) {
-    patch.startTime = game.time?.worldTime ?? 0;
+  if (start.time == null && existing.time == null) {
+    patch.time = game.time?.worldTime ?? 0;
   }
   if (game.combat?.started) {
-    if (duration.startRound == null && existing.startRound == null) {
-      patch.startRound = game.combat.round ?? 0;
+    if (start.round == null && existing.round == null) {
+      patch.round = game.combat.round ?? 0;
     }
-    if (duration.startTurn == null && existing.startTurn == null) {
-      patch.startTurn = game.combat.turn ?? 0;
+    if (start.turn == null && existing.turn == null) {
+      patch.turn = game.combat.turn ?? 0;
     }
-    if (duration.combat == null && existing.combat == null) {
+    if (start.combat == null && existing.combat == null) {
       patch.combat = game.combat.id;
+    }
+    if (start.combatant == null && existing.combatant == null) {
+      patch.combatant = game.combat.combatant?.id ?? null;
     }
   }
 
   if (!Object.keys(patch).length) return;
   foundry.utils.setProperty(
     data,
-    "duration",
-    foundry.utils.mergeObject(duration, patch, { inplace: false })
+    "start",
+    foundry.utils.mergeObject(start, patch, { inplace: false })
   );
 }
 
@@ -986,12 +1028,12 @@ function defaultRestExpiryEvents(type) {
 
 /**
  * @param {ActiveEffectConfig} app
- * @param {HTMLElement|JQuery} html
+ * @param {HTMLElement} html
  */
 function onRenderActiveEffectConfig(app, html) {
   if (!isExtendedEffectExpirationEnabled()) return;
 
-  const root = html instanceof HTMLElement ? html : html?.[0];
+  const root = html instanceof HTMLElement ? html : null;
   if (!root || root.querySelector(".dm-toolkit-end-effect")) return;
 
   const durationTab = findDurationTab(root);
@@ -1021,7 +1063,7 @@ function onRenderActiveEffectConfig(app, html) {
  */
 function findDurationTab(root) {
   return root.querySelector('.tab[data-tab="duration"], [data-application-part="duration"]')
-    ?? root.querySelector('select[name="duration.units"], select[name="duration.unit"]')?.closest(".tab, [data-application-part], form")
+    ?? root.querySelector('select[name="duration.units"]')?.closest(".tab, [data-application-part], form")
     ?? null;
 }
 
@@ -1031,7 +1073,7 @@ function findDurationTab(root) {
  */
 function captureStockControls(durationTab) {
   const valueInput = durationTab.querySelector('input[name="duration.value"]');
-  const unitsSelect = durationTab.querySelector('select[name="duration.units"], select[name="duration.unit"]');
+  const unitsSelect = durationTab.querySelector('select[name="duration.units"]');
   const expirySelect = durationTab.querySelector('select[name="duration.expiry"]');
   return {
     valueInput,
@@ -1427,7 +1469,7 @@ function insertRollLimitOption(select, unit, labelKey, hintKey) {
 
   const groups = [...select.querySelectorAll("optgroup")];
   const combatGroup = groups.find(group => group.querySelector(
-    'option[value="turns"], option[value="rounds"], option[value="turn"], option[value="round"], option[value="attacks"]'
+    'option[value="turns"], option[value="rounds"], option[value="attacks"]'
   ));
   if (combatGroup) {
     // Keep Attacks → Damage → Concentration Check order.
@@ -1454,7 +1496,7 @@ function insertRollLimitOption(select, unit, labelKey, hintKey) {
     return;
   }
   const after = select.querySelector(
-    'option[value="turns"], option[value="rounds"], option[value="turn"], option[value="round"], option[value="attacks"]'
+    'option[value="turns"], option[value="rounds"], option[value="attacks"]'
   );
   if (after) {
     if (unit === DAMAGE_UNIT) {
@@ -1661,7 +1703,7 @@ async function evaluateEndConditionsForEvent(event, context = {}) {
 }
 
 /**
- * After conditions need start markers; clearing native duration can leave them empty.
+ * After conditions need start markers; Foundry V13+ stores these on `effect.start`.
  * @param {ActiveEffect} effect
  */
 async function ensureEffectStartMarkers(effect) {
@@ -1671,11 +1713,14 @@ async function ensureEffectStartMarkers(effect) {
   if (!needsTime) return;
 
   const patch = {};
-  if (effect.duration?.startTime == null) patch["duration.startTime"] = game.time?.worldTime ?? 0;
+  if (effect.start?.time == null) patch["start.time"] = game.time?.worldTime ?? 0;
   if (game.combat?.started) {
-    if (effect.duration?.startRound == null) patch["duration.startRound"] = game.combat.round ?? 0;
-    if (effect.duration?.startTurn == null) patch["duration.startTurn"] = game.combat.turn ?? 0;
-    if (effect.duration?.combat == null) patch["duration.combat"] = game.combat.id;
+    if (effect.start?.round == null) patch["start.round"] = game.combat.round ?? 0;
+    if (effect.start?.turn == null) patch["start.turn"] = game.combat.turn ?? 0;
+    if (effect.start?.combat == null) patch["start.combat"] = game.combat.id;
+    if (effect.start?.combatant == null) {
+      patch["start.combatant"] = game.combat.combatant?.id ?? null;
+    }
   }
   if (!Object.keys(patch).length) return;
   try {
@@ -1832,8 +1877,9 @@ function isPseudoExpiryConditionMet(effect, expiry, context = {}) {
     : getEffectSourceActor(effect);
 
   const combatant = findCombatantForActor(combat, origin);
-  const startRound = effect.start?.round ?? effect.duration?.startRound ?? 0;
-  const startTurn = effect.start?.turn ?? effect.duration?.startTurn ?? 0;
+  const startRound = effect.start?.round;
+  const startTurn = effect.start?.turn;
+  if (startRound == null) return false;
   const round = context.round ?? combat.round ?? 0;
   const turn = context.turn ?? combat.turn ?? 0;
 
@@ -1898,9 +1944,9 @@ function getEffectSourceActor(effect) {
  */
 function resolveEffectStartCombat(effect) {
   const startCombat = effect.start?.combat;
-  if (startCombat) return startCombat;
-  const combatId = effect.duration?.combat;
-  return combatId ? (game.combats?.get(combatId) ?? null) : null;
+  if (!startCombat) return null;
+  if (typeof startCombat === "string") return game.combats?.get(startCombat) ?? null;
+  return startCombat;
 }
 
 /**
@@ -1951,25 +1997,31 @@ function isOnEventConditionReached(_effect, expiry, context = {}) {
 function isTimeAfterConditionMet(effect, condition, combat) {
   const value = Number(condition.value);
   if (!Number.isFinite(value) || value <= 0) return false;
-  const units = condition.units;
+  const units = normalizeTimeUnit(condition.units);
   if (!units) return false;
 
   if (units === "rounds" || units === "turns") {
     const activeCombat = combat
-      ?? game.combats?.get(effect.duration?.combat)
+      ?? resolveEffectStartCombat(effect)
       ?? game.combat;
-    if (!activeCombat) return false;
+    if (!activeCombat?.started) return false;
 
-    const startRound = effect.duration?.startRound ?? activeCombat.round ?? 0;
-    const startTurn = effect.duration?.startTurn ?? activeCombat.turn ?? 0;
+    // Foundry V13+ stores combat markers on effect.start (not duration).
+    const startRound = effect.start?.round;
+    const startTurn = effect.start?.turn;
+    if (startRound == null) return false;
+
     const round = activeCombat.round ?? 0;
     const turn = activeCombat.turn ?? 0;
-    const roundDelta = round - startRound;
+    const roundDelta = round - (Number(startRound) || 0);
 
     if (units === "rounds") return roundDelta >= value;
 
-    const turnsPerRound = Math.max(1, activeCombat.turns?.length || 1);
-    const turnDelta = (roundDelta * turnsPerRound) + (turn - startTurn);
+    const turnsPerRound = Math.max(
+      1,
+      activeCombat.turns?.length || activeCombat.combatants?.size || 1
+    );
+    const turnDelta = (roundDelta * turnsPerRound) + (turn - (Number(startTurn) || 0));
     return turnDelta >= value;
   }
 
@@ -1983,6 +2035,7 @@ function isTimeAfterConditionMet(effect, condition, combat) {
   };
   const factor = secondsPer[units];
   if (!factor) return false;
-  const start = effect.duration?.startTime ?? 0;
+  const start = effect.start?.time;
+  if (start == null) return false;
   return (game.time.worldTime - start) >= (value * factor);
 }
