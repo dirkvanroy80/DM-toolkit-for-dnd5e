@@ -12,6 +12,9 @@
       "name": "Dirk Van Roy"
     }
   ],
+  "url": "https://github.com/dirkvanroy80/DM-toolkit-for-dnd5e",
+  "manifest": "https://github.com/dirkvanroy80/DM-toolkit-for-dnd5e/releases/0.1.0/download/module.json",
+  "download": "https://github.com/dirkvanroy80/DM-toolkit-for-dnd5e/releases/0.1.0/download/DM-toolkit-for-dnd5e.zip",
   "esmodules": [
     "scripts/module.js"
   ],
