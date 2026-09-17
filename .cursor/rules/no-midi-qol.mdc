@@ -1,0 +1,15 @@
+---
+description: Never integrate with or reference midi-qol
+alwaysApply: true
+---
+
+# No midi-qol
+
+Do not use, detect, hook into, or depend on the **midi-qol** module in any way.
+
+- Do not check `game.modules.get("midi-qol")` or similar
+- Do not register `midi-qol.*` hooks
+- Do not call MidiQOL APIs, workflows, or helpers
+- Do not add midi-qol-specific code paths or fallbacks
+
+Implement features against **Foundry core** and the **dnd5e** system only.

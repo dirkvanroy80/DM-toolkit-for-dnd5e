@@ -1,0 +1,363 @@
+/* Ensure injected Auras tab content is visible when restored as the active tab. */
+.application .tab.dm-toolkit-auras.active,
+.app .tab.dm-toolkit-auras.active {
+  display: block;
+}
+
+.dm-toolkit-effect-aura {
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--color-border-light-tertiary, #782e22);
+}
+
+/* Extended effect expiration — End Effect UI */
+.dm-toolkit-end-effect-hidden {
+  display: none !important;
+}
+
+.dm-toolkit-end-effect {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.dm-toolkit-end-conditions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.dm-toolkit-end-or {
+  text-align: center;
+  font-weight: bold;
+  letter-spacing: 0.04em;
+  opacity: 0.85;
+}
+
+.application .dm-toolkit-end-condition .form-fields.dm-toolkit-end-condition-fields,
+.app .dm-toolkit-end-condition .form-fields.dm-toolkit-end-condition-fields {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.application .dm-toolkit-end-after-fields,
+.application .dm-toolkit-end-event-fields,
+.app .dm-toolkit-end-after-fields,
+.app .dm-toolkit-end-event-fields {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dm-toolkit-end-after-fields[hidden],
+.dm-toolkit-end-event-fields[hidden] {
+  display: none !important;
+}
+
+.dm-toolkit-end-condition select[data-dm-toolkit-field="mode"] {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 7rem;
+}
+
+.dm-toolkit-end-condition input[data-dm-toolkit-field="value"] {
+  flex: 0 0 auto;
+  width: 5rem;
+  max-width: 5rem;
+}
+
+.dm-toolkit-end-condition select[data-dm-toolkit-field="units"],
+.dm-toolkit-end-condition select[data-dm-toolkit-field="expiry"] {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 8rem;
+}
+
+.dm-toolkit-add-condition {
+  align-self: flex-start;
+}
+
+.dm-toolkit-remove-condition {
+  flex: 0 0 auto;
+}
+
+/* Portals */
+.dm-toolkit-portal-form .dm-toolkit-portal-form-body,
+.dm-toolkit-portal-manage .dm-toolkit-portal-manage-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem;
+}
+
+.dm-toolkit-portal-manage .window-content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.dm-toolkit-portal-manage .dm-toolkit-portal-manage-body {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.dm-toolkit-portal-manage-layout {
+  display: grid;
+  grid-template-columns: minmax(12rem, 40%) 1fr;
+  gap: 0.75rem;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.dm-toolkit-portal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  min-height: 0;
+  max-height: 100%;
+  border: 1px solid var(--color-border-light-primary, #782e22);
+  border-radius: 4px;
+}
+
+.dm-toolkit-portal-list li button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  min-height: 0;
+  line-height: 1.25;
+  text-align: left;
+  border: none;
+  border-radius: 0;
+  border-bottom: 1px solid var(--color-border-light-tertiary, #444);
+  background: transparent;
+  color: inherit;
+  padding: 0.45rem 0.55rem;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.dm-toolkit-portal-list li.selected button,
+.dm-toolkit-portal-list li button:hover {
+  background: var(--color-warm-2, rgba(120, 46, 34, 0.25));
+}
+
+.dm-toolkit-portal-list-name {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dm-toolkit-portal-list li button span {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  opacity: 0.8;
+  font-size: 0.85em;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dm-toolkit-portal-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-height: 0;
+  overflow: auto;
+}
+
+.dm-toolkit-portal-player-activate {
+  margin-left: 1.25rem;
+}
+
+.dm-toolkit-portal-activate-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 70;
+}
+
+.dm-toolkit-portal-activate {
+  position: absolute;
+  transform: translateY(-50%);
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dm-toolkit-portal-activate.inactive {
+  opacity: 0.55;
+}
+
+/* Enhanced status effects — custom conditions manager */
+.dm-toolkit-custom-conditions-app .dm-toolkit-custom-conditions-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+}
+
+.dm-toolkit-custom-conditions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.dm-toolkit-custom-condition-row {
+  border: 1px solid var(--color-border-light-primary, #782e22);
+  border-radius: 4px;
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.dm-toolkit-custom-condition-effect-row {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.dm-toolkit-custom-condition-effect-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dm-toolkit-custom-condition-row file-picker {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+
+.dm-toolkit-custom-conditions .conditions-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  --icon-size: 18px;
+}
+
+.dm-toolkit-custom-conditions .conditions-list .condition .icon,
+.dm-toolkit-token-conditions-app .conditions-list .condition .icon {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+}
+
+.dm-toolkit-custom-conditions .conditions-list .condition .icon dnd5e-icon,
+.dm-toolkit-custom-conditions .conditions-list .condition .icon img,
+.dm-toolkit-token-conditions-app .conditions-list .condition .icon dnd5e-icon,
+.dm-toolkit-token-conditions-app .conditions-list .condition .icon img {
+  width: 18px;
+  height: 18px;
+  max-width: 18px;
+  max-height: 18px;
+  object-fit: contain;
+}
+
+.dm-toolkit-custom-conditions .conditions-list .condition.dm-toolkit-condition-placeholder {
+  visibility: hidden;
+  pointer-events: none;
+  cursor: default;
+  border-color: transparent;
+}
+
+.dm-toolkit-custom-conditions .conditions-list .condition,
+.dm-toolkit-token-conditions-app .conditions-list .condition {
+  cursor: pointer;
+}
+
+/* Token HUD conditions popup */
+.dm-toolkit-token-conditions-app {
+  min-width: 560px;
+}
+
+.dm-toolkit-token-conditions-app .window-header [data-action="close"],
+.dm-toolkit-token-conditions-app .window-header [data-action="toggleControls"] {
+  display: none !important;
+}
+
+.dm-toolkit-token-conditions-app .window-content {
+  overflow-x: hidden;
+}
+
+.dm-toolkit-token-conditions-app .dm-toolkit-token-conditions-body {
+  padding: 0.5rem;
+  box-sizing: border-box;
+  max-height: min(70vh, 640px);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.dm-toolkit-token-conditions-app .dm-toolkit-token-conditions-effects {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.dm-toolkit-token-conditions-app .conditions-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  --icon-size: 18px;
+  min-width: 0;
+}
+
+.dm-toolkit-token-conditions-app .conditions-list .condition {
+  min-width: 0;
+}
+
+.dm-toolkit-token-conditions-app .conditions-list .condition .name-stacked,
+.dm-toolkit-token-conditions-app .conditions-list .condition .title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dm-toolkit-token-conditions-app .dm-toolkit-custom-conditions .conditions-list .condition.dm-toolkit-condition-placeholder {
+  visibility: hidden;
+  pointer-events: none;
+  cursor: default;
+  border-color: transparent;
+}
