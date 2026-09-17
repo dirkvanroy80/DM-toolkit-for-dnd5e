@@ -1,10 +1,13 @@
 # DM Toolkit D&D 5e
 
 A Foundry VTT module with optional DM-focused tools for the **dnd5e** system. Features are built on Foundry core and dnd5e only.
+
 STILL IN TESTING PHASE!
 
+latest manifest: https://github.com/dirkvanroy80/DM-toolkit-for-dnd5e/releases/0.1.0/download/module.json
+
 **Compatibility:** 
-v0.1.0 Foundry VTT 14 (verified 14.367), dnd5e 6.0.0
+- v0.1.0: Foundry VTT 14 (verified 14.367), dnd5e 6.0.0
 
 Most features are **off by default**. Enable what you need under **Configure Settings → Module Settings → DM Toolkit D&D 5e**.
 
