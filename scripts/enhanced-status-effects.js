@@ -9,6 +9,7 @@ const DATA_SETTING = "enhancedStatusEffectsData";
 const MENU_KEY = "enhancedStatusEffectsMenu";
 const EFFECTS_ITEM_FLAG = "customConditionsItem";
 const CONDITION_FLAG = "customConditionId";
+const AURA_FLAG = "aura";
 const DEFAULT_CONDITION_IMG = "icons/svg/aura.svg";
 
 /** @type {Set<string>} */
@@ -226,17 +227,24 @@ function extractChanges(source) {
  * @returns {Promise<void>}
  */
 async function enableCondition(actor, conditionId) {
+  const condition = getConditions().find(c => c.id === conditionId);
   const existing = findAppliedEffect(actor, conditionId);
   if (existing) {
     if (!existing.active) {
-      await existing.update({
+      const update = {
         disabled: false,
         duration: { units: "seconds", expired: false }
-      });
+      };
+      // Older applied copies may lack aura flags; refresh from the template when re-enabling.
+      if (condition) {
+        const template = await buildEffectDataForCondition(condition, actor);
+        const aura = template?.flags?.[MODULE_ID]?.[AURA_FLAG];
+        if (aura) update[`flags.${MODULE_ID}.${AURA_FLAG}`] = foundry.utils.deepClone(aura);
+      }
+      await existing.update(update);
     }
     return;
   }
-  const condition = getConditions().find(c => c.id === conditionId);
   if (!condition) return;
 
   try {
@@ -245,7 +253,11 @@ async function enableCondition(actor, conditionId) {
       ui.notifications.warn(game.i18n.localize("DM-TOOLKIT-DND5E.EnhancedStatusEffects.ErrNoEffect"));
       return;
     }
-    if (!data.system.changes.length) {
+    const hasChanges = data.system.changes.length > 0;
+    const hasStatuses = (data.statuses?.length ?? 0) > 0;
+    const hasRiders = extractRiderStatuses(data).length > 0;
+    const hasAura = data.flags?.[MODULE_ID]?.[AURA_FLAG]?.enabled === true;
+    if (!hasChanges && !hasStatuses && !hasRiders && !hasAura) {
       ui.notifications.warn(game.i18n.localize("DM-TOOLKIT-DND5E.EnhancedStatusEffects.ErrNoChanges"));
       return;
     }
@@ -256,11 +268,14 @@ async function enableCondition(actor, conditionId) {
       ui.notifications.error(game.i18n.localize("DM-TOOLKIT-DND5E.EnhancedStatusEffects.ErrApplyFailed"));
       return;
     }
+    // System hooks normally create Separate Status Conditions on create; fill any that were missed.
+    await ensureRiderConditions(created);
     console.log(`${MODULE_ID} | Applied custom condition`, {
       conditionId,
       effectId: created.id,
       active: created.active,
       changeCount: created.system?.changes?.length ?? 0,
+      riders: extractRiderStatuses(created),
       changes: created.system?.changes?.map(c => ({ key: c.key, type: c.type, value: c.value, phase: c.phase }))
     });
   } catch (err) {
@@ -303,12 +318,28 @@ async function buildEffectDataForCondition(condition, actor = null) {
   const img = normalizeConditionImg(condition.img || source.img);
   const statuses = source.statuses instanceof Set
     ? Array.from(source.statuses)
-    : Array.from(source.statuses ?? []);
+    : Array.from(source.statuses ?? source._source?.statuses ?? []);
   const description = source.description
     ?? source._source?.description
     ?? "";
+  const riderStatuses = extractRiderStatuses(source);
 
-  // Minimal payload — avoid cloning template duration/expiry/filters/flags that break application.
+  const moduleFlags = {
+    [CONDITION_FLAG]: condition.id
+  };
+  const aura = extractAuraFlag(source);
+  if (aura) moduleFlags[AURA_FLAG] = aura;
+
+  const flags = {
+    [MODULE_ID]: moduleFlags
+  };
+  // Older dnd5e stores Separate Status Conditions here; migrateData may move them to system.rider.
+  if (riderStatuses.length) {
+    flags.dnd5e = { riders: { statuses: riderStatuses } };
+  }
+
+  // Minimal payload — avoid cloning template duration/expiry/filters that break application.
+  // Aura + rider statuses are copied so applied effects match the linked template.
   return {
     type: "base",
     name,
@@ -321,15 +352,117 @@ async function buildEffectDataForCondition(condition, actor = null) {
     start: ActiveEffectCls.getEffectStart?.() ?? { time: game.time?.worldTime ?? 0 },
     system: {
       changes,
-      magical: false
+      magical: false,
+      ...(riderStatuses.length ? { rider: { statuses: riderStatuses } } : {})
     },
-    flags: {
-      [MODULE_ID]: { [CONDITION_FLAG]: condition.id }
-    },
+    flags,
     _stats: source.uuid ? {
       duplicateSource: source.uuid,
       compendiumSource: null
     } : undefined
+  };
+}
+
+/**
+ * Separate Status Conditions (dnd5e riders) from a template / applied effect / cache.
+ * Supports both legacy flags.dnd5e.riders.statuses and system.rider.statuses (dnd5e 6+).
+ * @param {ActiveEffect|object|null} source
+ * @returns {string[]}
+ */
+function extractRiderStatuses(source) {
+  if (!source) return [];
+  let raw = null;
+  if (typeof source.getFlag === "function") {
+    raw = source.getFlag("dnd5e", "riders.statuses");
+  }
+  if (raw == null) {
+    raw = foundry.utils.getProperty(source, "system.rider.statuses")
+      ?? foundry.utils.getProperty(source, "_source.system.rider.statuses")
+      ?? foundry.utils.getProperty(source, "flags.dnd5e.riders.statuses")
+      ?? foundry.utils.getProperty(source, "_source.flags.dnd5e.riders.statuses");
+  }
+  if (raw instanceof Set) return Array.from(raw).map(String).filter(Boolean);
+  if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
+  return [];
+}
+
+/**
+ * Create dnd5e Separate Status Conditions for an applied effect if any are still missing.
+ * Prefer the system APIs (which skip existing status effects).
+ * @param {ActiveEffect} effect
+ * @returns {Promise<void>}
+ */
+async function ensureRiderConditions(effect) {
+  if (!effect?.active || !(effect.parent instanceof Actor)) return;
+  const riders = extractRiderStatuses(effect);
+  if (!riders.length) return;
+
+  const missing = riders.filter(id => !effect.parent.effects.get(dnd5eConditionEffectId(id)));
+  if (!missing.length) return;
+
+  // Legacy / deprecated wrapper — skips statuses that already exist on the actor.
+  if (typeof effect.createRiderConditions === "function") {
+    try {
+      await effect.createRiderConditions();
+      return;
+    } catch (err) {
+      console.warn(`${MODULE_ID} | createRiderConditions failed; falling back`, err);
+    }
+  }
+
+  // dnd5e 6+: batch API when the deprecated wrapper is gone.
+  if (typeof effect.system?.collectRiders === "function") {
+    try {
+      const batch = await effect.system.collectRiders();
+      if (batch?.length && typeof foundry.documents.modifyBatch === "function") {
+        await foundry.documents.modifyBatch(batch);
+        return;
+      }
+    } catch (err) {
+      console.warn(`${MODULE_ID} | collectRiders failed; falling back`, err);
+    }
+  }
+
+  const ActiveEffectCls = CONFIG.ActiveEffect.documentClass;
+  if (typeof ActiveEffectCls.fromStatusEffect !== "function") return;
+  const toCreate = [];
+  for (const statusId of missing) {
+    try {
+      const statusEffect = await ActiveEffectCls.fromStatusEffect(statusId);
+      if (statusEffect) toCreate.push(statusEffect.toObject());
+    } catch (err) {
+      console.warn(`${MODULE_ID} | Failed to build rider status`, statusId, err);
+    }
+  }
+  if (toCreate.length) {
+    await ActiveEffectCls.createDocuments(toCreate, { keepId: true, parent: effect.parent });
+  }
+}
+
+/**
+ * Copy aura settings from a linked Active Effect template / cached snapshot.
+ * @param {ActiveEffect|object} source
+ * @returns {object|null}
+ */
+function extractAuraFlag(source) {
+  if (!source) return null;
+  let raw = null;
+  if (typeof source.getFlag === "function") {
+    raw = source.getFlag(MODULE_ID, AURA_FLAG);
+  }
+  if (raw == null) {
+    raw = foundry.utils.getProperty(source, `flags.${MODULE_ID}.${AURA_FLAG}`)
+      ?? foundry.utils.getProperty(source, `_source.flags.${MODULE_ID}.${AURA_FLAG}`);
+  }
+  if (!raw || typeof raw !== "object") return null;
+
+  const alpha = Number(raw.alpha);
+  return {
+    enabled: raw.enabled === true || raw.enabled === "true" || raw.enabled === 1 || raw.enabled === "1"
+      || (Array.isArray(raw.enabled) && (raw.enabled.includes(true) || raw.enabled.includes("true"))),
+    radius: Number.isFinite(Number(raw.radius)) ? Number(raw.radius) : 10,
+    color: typeof raw.color === "string" && raw.color ? raw.color : "#00ff00",
+    alpha: Number.isFinite(alpha) ? Math.min(1, Math.max(0, alpha)) : 0.25
   };
 }
 
@@ -396,20 +529,19 @@ function onRenderActorSheet(app, element) {
   if (!root) return;
 
   // Avoid duplicate injection on partial re-renders.
+  root.querySelector(".dm-toolkit-core-conditions")?.remove();
   root.querySelector(".dm-toolkit-custom-conditions")?.remove();
-
-  const conditions = getConditions();
-  if (!conditions.length) return;
 
   const host = root.querySelector("dnd5e-effects") ?? root.querySelector(".effects-element");
   if (!host) return;
 
-  const after = host.querySelector(".conditions-list")?.closest("section.items-list");
-  const section = buildCustomConditionsSection(actor, {
-    onChanged: () => app.render({ force: true })
-  });
-  if (after) after.after(section);
-  else host.append(section);
+  const refresh = () => app.render({ force: true });
+  const coreSection = buildCoreConditionsSection(actor, { onChanged: refresh });
+  const nativeConditions = host.querySelector(".conditions-list")?.closest("section.items-list");
+  if (nativeConditions) nativeConditions.replaceWith(coreSection);
+  else host.prepend(coreSection);
+
+  coreSection.after(buildCustomConditionsSection(actor, { onChanged: refresh }));
 }
 
 /**
@@ -470,26 +602,50 @@ function hasConditionLevels(conditionId) {
 }
 
 /**
- * Core dnd5e conditions as shown on the Effects tab (excludes pseudo-conditions).
+ * Resolve a display name for a condition / status config entry.
+ * @param {object} config
+ * @param {string} id
+ * @returns {string}
+ */
+function localizeConditionName(config, id) {
+  const raw = config?.name ?? config?.label ?? id;
+  if (typeof raw !== "string" || !raw) return id;
+  return game.i18n.has(raw) ? game.i18n.localize(raw) : raw;
+}
+
+/**
+ * All in-game conditions / HUD status effects (including pseudo conditions like Silenced).
  * @param {Actor} actor
- * @returns {{id: string, name: string, img: string, active: boolean, level: number|null, reference: string|null}[]}
+ * @returns {{id: string, name: string, img: string, active: boolean, level: number|null, reference: string|null, order: number}[]}
  */
 function getCoreConditionEntries(actor) {
-  const types = CONFIG.DND5E?.conditionTypes ?? {};
-  return Object.entries(types).reduce((arr, [id, config]) => {
-    if (config?.pseudo) return arr;
+  /** @type {Map<string, object>} */
+  const byId = new Map();
+
+  // Full token HUD set (conditions + extras like dead, concentrating, cover, …).
+  for (const se of CONFIG.statusEffects ?? []) {
+    if (!se?.id || se.hud === false) continue;
+    byId.set(se.id, se);
+  }
+  // Ensure every conditionType is present, including pseudo entries (e.g. Silenced).
+  for (const [id, config] of Object.entries(CONFIG.DND5E?.conditionTypes ?? {})) {
+    if (config?.hud === false) continue;
+    byId.set(id, foundry.utils.mergeObject(byId.get(id) ?? {}, config, { inplace: false }));
+  }
+
+  return Array.from(byId.entries()).map(([id, config]) => {
     const existing = actor.effects.get(dnd5eConditionEffectId(id));
     const active = Boolean(existing) && !existing.disabled;
-    arr.push({
+    return {
       id,
-      name: config.name,
-      img: existing?.img || config.img || "icons/svg/aura.svg",
+      name: localizeConditionName(config, id),
+      img: existing?.img || config.img || config.icon || "icons/svg/aura.svg",
       active,
       level: hasConditionLevels(id) ? (actor.system?.conditions?.[id] ?? 0) : null,
-      reference: config.reference || null
-    });
-    return arr;
-  }, []);
+      reference: config.reference || null,
+      order: Number.isFinite(config.order) ? config.order : Infinity
+    };
+  }).sort((a, b) => (a.order - b.order) || a.name.localeCompare(b.name, game.i18n.lang));
 }
 
 /**
@@ -509,13 +665,7 @@ async function toggleCoreCondition(actor, conditionId, event) {
     });
     return;
   }
-  const existing = actor.effects.get(dnd5eConditionEffectId(conditionId));
-  if (existing) {
-    await existing.delete();
-    return;
-  }
-  const effect = await CONFIG.ActiveEffect.documentClass.fromStatusEffect(conditionId);
-  await CONFIG.ActiveEffect.documentClass.create(effect, { parent: actor, keepId: true });
+  await actor.toggleStatusEffect(conditionId);
 }
 
 /**
